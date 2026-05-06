@@ -134,13 +134,39 @@ shape label.
 
 ## How It Works
 
-Unlike traditional systems that just show historical reactions, this system derives predictions from **what the market is currently pricing in**:
+Unlike traditional systems that just show historical reactions, this system derives predictions from **what the market is currently pricing in** plus a calibrated reaction model. Every signal below is live-fetched on each run.
+
+### Live Market-Implied Signals
 
 1. **VIX & Implied Volatility** → Expected move magnitude
 2. **Yield Curve Shape** → Rate expectations and recession risk
-3. **Fed Funds Futures** → Probability of rate cuts/hikes
-4. **TIPS Spreads** → Inflation expectations
-5. **Historical Sensitivity** → Directional bias for different surprise outcomes
+3. **Fed Funds Futures** (`ZQ=F`) → Probability of rate cuts/hikes
+4. **TIPS Spreads** (TIP/TLT ratio) → Inflation expectations
+5. **VIX Term Structure & Regime** (low / normal / high / extreme buckets) → Volatility-regime multipliers (×0.7 to ×2.0) on expected-move sizing
+
+### Live Macro Inputs (FRED)
+
+6. **Live Macro Releases** (CPIAUCSL, CPILFESL, PAYEMS, UNRATE, PCEPILFE, GDP, ISM, RSAFS, ICSA …) → Fresh `previous` actual + trailing-3-period consensus proxy on every run
+7. **Live Fed Funds Target Rate** (DFEDTARU) → Baseline policy rate that anchors the cut/hike probability calculation (replaces the old `5.25` constant)
+8. **Manual Consensus Override** (`data/consensus_overrides.json`) → Lets you pin Bloomberg / ForexFactory / Investing consensus values; beats both the FRED proxy and static fallback
+
+### Model Mechanics (Reaction Calibration)
+
+9. **Historical Sensitivity Matrix** → Per-indicator × per-instrument coefficients mapping a 1σ surprise to an expected move (e.g. `CPI MoM × SPY = −0.4%`, `NFP × TLT = −0.35%`, `Fed Funds × DXY = +0.45%`)
+10. **Surprise Z-Score Engine** → Standardizes every release as `(actual − consensus) / HISTORICAL_STD[indicator]` and classifies it into 7 buckets (large_beat → beat → slight_beat → inline → slight_miss → miss → large_miss)
+11. **Event-Type Multipliers** → Volatility scaling per event category (inflation 1.5×, rates 2.0×, employment 1.3×, growth 1.1×, PMI 0.9×)
+12. **Event-Impact Level Multipliers** → LOW 0.5× / MEDIUM 0.8× / HIGH 1.2× / CRITICAL 1.8×
+13. **Cross-Asset Type Scaling** → Equity 1.0×, bonds 0.7×, FX 0.5×, commodities 0.8× — calibrates how the same surprise propagates across asset classes
+14. **Market Regime Classifier** → Combined `risk_on / neutral / risk_off × expansion / recession_risk` state derived from VIX regime + curve inversion; modulates the sign and strength of the directional bias
+
+### Output Engines
+
+15. **Monte-Carlo Distribution Sampler** → 1000 simulations per event/instrument → `P(Up)`, `P(Down)`, 5th/95th percentile bands and `prob_large_move` (>1%)
+16. **5-Scenario Analysis** → `large_beat / beat / inline / miss / large_miss` with probabilities (5% / 20% / 50% / 20% / 5%) and per-instrument expected moves
+17. **Risk Assessment Score (0–10)** → `(vix_risk + event_risk) / 2`, bucketed into LOW / MEDIUM / HIGH / EXTREME plus a positioning recommendation
+18. **Implied-Expectation Reverse-Engineering** → Given current pre-release moves across instruments, the system inverts the sensitivity matrix to infer what *number* the market is pricing in (`get_market_priced_expectation`)
+19. **Combined Multi-Surprise Impact** → When several events release simultaneously (e.g. CPI + Core CPI + Retail Sales same day), expected moves are summed per instrument with proper sign handling
+20. **Cross-Instrument Correlation Matrix** → Rolling-window correlation across the prediction universe (`get_correlation_matrix`)
 
 ## Data Freshness
 
