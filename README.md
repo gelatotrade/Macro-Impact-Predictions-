@@ -138,35 +138,111 @@ Unlike traditional systems that just show historical reactions, this system deri
 
 ### Live Market-Implied Signals
 
-1. **VIX & Implied Volatility** → Expected move magnitude
-2. **Yield Curve Shape** → Rate expectations and recession risk
-3. **Fed Funds Futures** (`ZQ=F`) → Probability of rate cuts/hikes
-4. **TIPS Spreads** (TIP/TLT ratio) → Inflation expectations
-5. **VIX Term Structure & Regime** (low / normal / high / extreme buckets) → Volatility-regime multipliers (×0.7 to ×2.0) on expected-move sizing
+#### 1. VIX & Implied Volatility → Expected move magnitude
+The whole expected-move surface scales linearly with current VIX. Daily SPY σ ≈ `VIX / √252`.
+
+![VIX & Implied Volatility](assets/visualizations/market_implied_predictions_v2.gif)
+
+#### 2. Yield Curve Shape → Rate expectations and recession risk
+Front-end (3M, Fed-driven) and long-end (30Y, growth/inflation-driven) animate independently. Slope flips between NORMAL ↔ FLAT ↔ INVERTED.
+
+![Yield Curve Shape](assets/visualizations/yield_curve_v2.gif)
+
+#### 3. Fed Funds Futures (`ZQ=F`) → Probability of rate cuts/hikes
+Stacked probability bars per upcoming FOMC meeting. Conviction decays with horizon; near-term meetings have sharper P(Cut)/P(Hold)/P(Hike).
+
+![Fed Funds Futures](assets/visualizations/fed_funds_futures_v2.gif)
+
+#### 4. TIPS Spreads (TIP/TLT ratio) → Inflation expectations
+Breakeven inflation surface across tenor and time. The 5Y end is more reactive than the 30Y; sweep shows RISING / STABLE / FALLING regimes.
+
+![TIPS Spreads](assets/visualizations/tips_spreads_v2.gif)
+
+#### 5. VIX Term Structure & Regime → Volatility-regime multipliers (×0.7 to ×2.0)
+Spot / 1M / 3M / 6M / 9M VIX futures. As spot VIX spikes, the curve flips from CONTANGO (green) to BACKWARDATION (red).
+
+![VIX Term Structure](assets/visualizations/vix_term_structure_v2.gif)
 
 ### Live Macro Inputs (FRED)
 
-6. **Live Macro Releases** (CPIAUCSL, CPILFESL, PAYEMS, UNRATE, PCEPILFE, GDP, ISM, RSAFS, ICSA …) → Fresh `previous` actual + trailing-3-period consensus proxy on every run
-7. **Live Fed Funds Target Rate** (DFEDTARU) → Baseline policy rate that anchors the cut/hike probability calculation (replaces the old `5.25` constant)
-8. **Manual Consensus Override** (`data/consensus_overrides.json`) → Lets you pin Bloomberg / ForexFactory / Investing consensus values; beats both the FRED proxy and static fallback
+#### 6. Live Macro Releases → Fresh `previous` + consensus proxy on every run
+A live tick stream (CPIAUCSL, CPILFESL, PAYEMS, UNRATE, PCEPILFE, GDP, ISM, RSAFS, ICSA …). Wave intensity scales with the latest VIX tick.
+
+![Live Macro Releases](assets/visualizations/real_time_analysis_v2.gif)
+
+#### 7. Live Fed Funds Target Rate (DFEDTARU) → Baseline policy rate
+24-month FFTR walk: HIKING phase (months 1–12) → PEAK → CUTTING. Replaces the old `5.25` constant; the cyan cursor marks the current month.
+
+![Live Fed Funds Target Rate](assets/visualizations/fed_funds_target_rate_v2.gif)
+
+#### 8. Manual Consensus Override (`data/consensus_overrides.json`) → User-pinned values
+Three side-by-side bars per indicator: **Static Fallback** / **FRED Proxy** / **Override**. The override (yellow) fades in mid-animation and becomes the active source.
+
+![Consensus Override](assets/visualizations/consensus_override_v2.gif)
 
 ### Model Mechanics (Reaction Calibration)
 
-9. **Historical Sensitivity Matrix** → Per-indicator × per-instrument coefficients mapping a 1σ surprise to an expected move (e.g. `CPI MoM × SPY = −0.4%`, `NFP × TLT = −0.35%`, `Fed Funds × DXY = +0.45%`)
-10. **Surprise Z-Score Engine** → Standardizes every release as `(actual − consensus) / HISTORICAL_STD[indicator]` and classifies it into 7 buckets (large_beat → beat → slight_beat → inline → slight_miss → miss → large_miss)
-11. **Event-Type Multipliers** → Volatility scaling per event category (inflation 1.5×, rates 2.0×, employment 1.3×, growth 1.1×, PMI 0.9×)
-12. **Event-Impact Level Multipliers** → LOW 0.5× / MEDIUM 0.8× / HIGH 1.2× / CRITICAL 1.8×
-13. **Cross-Asset Type Scaling** → Equity 1.0×, bonds 0.7×, FX 0.5×, commodities 0.8× — calibrates how the same surprise propagates across asset classes
-14. **Market Regime Classifier** → Combined `risk_on / neutral / risk_off × expansion / recession_risk` state derived from VIX regime + curve inversion; modulates the sign and strength of the directional bias
+#### 9. Historical Sensitivity Matrix → 1σ surprise → expected move
+3D grid of *event × instrument* coefficients. The active event row lights up in turn (CPI MoM, Core CPI, NFP, Unemp, FOMC, PCE) — color codes sign (red = down, green = up).
+
+![Sensitivity Matrix](assets/visualizations/sensitivity_matrix_v2.gif)
+
+#### 10. Surprise Z-Score Engine → 7-bucket classifier
+Bell curve in 3D, colored by bucket (large_miss → large_beat). The cyan marker is the actual release walking across z = −2.5 → +2.5.
+
+![Surprise Z-Score](assets/visualizations/surprise_z_score_v2.gif)
+
+#### 11. Event-Type Multipliers → Volatility scaling per event category
+Inflation 1.5×, rates 2.0×, employment 1.3×, growth 1.1×, PMI 0.9×. The active category is highlighted in yellow.
+
+![Event-Type Multipliers](assets/visualizations/event_type_multipliers_v2.gif)
+
+#### 12. Event-Impact Level Multipliers → LOW 0.5× / MED 0.8× / HIGH 1.2× / CRITICAL 1.8×
+Bars per instrument; the entire grid re-scales as the impact level cycles.
+
+![Event-Impact Multipliers](assets/visualizations/multi_asset_coverage_v2.gif)
+
+#### 13. Cross-Asset Type Scaling → eq 1.0× / fi 0.7× / fx 0.5× / cm 0.8×
+The same 1σ surprise propagates differently per asset class. Animation sweeps the surprise from −2σ (red bars below zero) to +2σ (green above zero).
+
+![Cross-Asset Scaling](assets/visualizations/cross_asset_scaling_v2.gif)
+
+#### 14. Market Regime Classifier → risk_on/off × expansion/recession_risk
+Stress surface over `VIX × yield-curve slope`. Cyan marker traces a full cycle through the four quadrants.
+
+![Market Regime](assets/visualizations/market_regime_v2.gif)
 
 ### Output Engines
 
-15. **Monte-Carlo Distribution Sampler** → 1000 simulations per event/instrument → `P(Up)`, `P(Down)`, 5th/95th percentile bands and `prob_large_move` (>1%)
-16. **5-Scenario Analysis** → `large_beat / beat / inline / miss / large_miss` with probabilities (5% / 20% / 50% / 20% / 5%) and per-instrument expected moves
-17. **Risk Assessment Score (0–10)** → `(vix_risk + event_risk) / 2`, bucketed into LOW / MEDIUM / HIGH / EXTREME plus a positioning recommendation
-18. **Implied-Expectation Reverse-Engineering** → Given current pre-release moves across instruments, the system inverts the sensitivity matrix to infer what *number* the market is pricing in (`get_market_priced_expectation`)
-19. **Combined Multi-Surprise Impact** → When several events release simultaneously (e.g. CPI + Core CPI + Retail Sales same day), expected moves are summed per instrument with proper sign handling
-20. **Cross-Instrument Correlation Matrix** → Rolling-window correlation across the prediction universe (`get_correlation_matrix`)
+#### 15. Monte-Carlo Distribution Sampler → P(Up), P(Down), 5/95 percentiles
+Density surface `Z = N(X; μ, σ)`. Mean μ (directional bias) and σ (vol regime) animate independently.
+
+![Monte-Carlo Distribution](assets/visualizations/probability_distribution_v2.gif)
+
+#### 16. 5-Scenario Analysis → large_beat / beat / inline / miss / large_miss
+Surface of *Scenario × Instrument → Move %*. The whole surface flips sign as the event category cross-fades between **Growth** and **Inflation**.
+
+![5-Scenario Analysis](assets/visualizations/scenario_analysis_v2.gif)
+
+#### 17. Risk Assessment Score (0–10) → LOW / MEDIUM / HIGH / EXTREME
+Risk peak grows and sharpens as VIX rises 12 → 35. The bucket label steps up in lockstep.
+
+![Risk Assessment](assets/visualizations/risk_assessment_v2.gif)
+
+#### 18. Implied-Expectation Reverse-Engineering → infer the consensus the market is pricing
+Pre-release moves across instruments are inverted through the sensitivity matrix to recover the surprise z-score the market has already priced in.
+
+![Implied Expectation](assets/visualizations/implied_expectation_v2.gif)
+
+#### 19. Combined Multi-Surprise Impact → simultaneous releases
+Stacked impact per instrument when CPI MoM, Core CPI, and Retail Sales release the same morning. Layers stack on one at a time.
+
+![Combined Surprises](assets/visualizations/combined_surprises_v2.gif)
+
+#### 20. Cross-Instrument Correlation Matrix → rolling regime-aware correlations
+6×6 correlation grid. As the regime shifts toward RISK_OFF, correlations compress (everything sells together); RISK_ON regimes show clean diversification.
+
+![Correlation Matrix](assets/visualizations/correlation_matrix_v2.gif)
 
 ## Data Freshness
 

@@ -560,6 +560,714 @@ def interactive_dashboard():
     _save(fig, anim, "interactive_dashboard")
 
 
+# ---------------------------------------------------------------------
+# 10. Fed Funds Futures
+# ---------------------------------------------------------------------
+def fed_funds_futures():
+    """Stacked bars per upcoming FOMC meeting. Animate: time progresses,
+    P(Cut)/P(Hold)/P(Hike) updates."""
+    print("fed_funds_futures...")
+    meetings = ["Mar", "May", "Jun", "Jul", "Sep", "Nov"]
+    n = len(meetings)
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Fed Funds Futures - Implied FOMC Path")
+        # Animated variable: market mood shifts dovish→hawkish→dovish
+        mood = np.sin(frame / FRAMES * 2 * np.pi)  # +1 = dovish, -1 = hawkish
+        idx = np.arange(n)
+        # Probabilities evolve with horizon: closer meetings have sharper conviction
+        horizon_decay = np.exp(-idx * 0.3)
+        p_cut = np.clip(0.35 + 0.4 * mood * horizon_decay, 0.0, 0.95)
+        p_hike = np.clip(0.15 - 0.3 * mood * horizon_decay, 0.0, 0.95)
+        p_hold = np.clip(1 - p_cut - p_hike, 0.0, 1.0)
+        # Stacked bars
+        ax.bar3d(idx, np.zeros(n), np.zeros(n),
+                 0.6, 0.6, p_cut * 100,
+                 color="#00C851", alpha=0.9, shade=True)
+        ax.bar3d(idx, np.zeros(n), p_cut * 100,
+                 0.6, 0.6, p_hold * 100,
+                 color="#ffbb33", alpha=0.9, shade=True)
+        ax.bar3d(idx, np.zeros(n), (p_cut + p_hold) * 100,
+                 0.6, 0.6, p_hike * 100,
+                 color="#ff4444", alpha=0.9, shade=True)
+        ax.set_xticks(idx)
+        ax.set_xticklabels(meetings)
+        ax.set_yticks([])
+        ax.set_zlim(0, 110)
+        ax.set_zlabel("Probability %")
+        ax.view_init(elev=25, azim=-60)
+        bias = "DOVISH" if mood > 0.2 else "HAWKISH" if mood < -0.2 else "NEUTRAL"
+        _hud(ax, [
+            f"Bias        = {bias}",
+            f"Next: P(Cut)  = {p_cut[0]*100:4.1f}%",
+            f"Next: P(Hold) = {p_hold[0]*100:4.1f}%",
+            f"Next: P(Hike) = {p_hike[0]*100:4.1f}%",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "fed_funds_futures")
+
+
+# ---------------------------------------------------------------------
+# 11. TIPS Spreads
+# ---------------------------------------------------------------------
+def tips_spreads():
+    """Breakeven inflation surface: tenor × time → breakeven %.
+    Animate the breakeven shifting up/down."""
+    print("tips_spreads...")
+    tenors = np.array([2, 5, 7, 10, 20, 30])
+    times = np.arange(40)
+    T, M = np.meshgrid(times, tenors)
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "TIPS Breakeven Inflation Surface")
+        phase = frame / FRAMES * 2 * np.pi
+        # Animated: breakeven inflation drifts 1.8% → 3.2% → 1.8%
+        be_5y = 2.5 + 0.7 * np.sin(phase)
+        be_30y = 2.3 + 0.4 * np.cos(phase * 0.6)
+        # Term-structure: short-end more reactive than long-end
+        slope = (be_30y - be_5y) / 25
+        Z = be_5y + slope * (M - 5) + 0.05 * np.sin(T * 0.4 + phase)
+        ax.plot_surface(T, M, Z, cmap=cm.YlOrRd, alpha=0.9,
+                        linewidth=0, antialiased=True, vmin=1.0, vmax=4.0)
+        ax.set_xlabel("Time (days)")
+        ax.set_ylabel("Tenor (years)")
+        ax.set_zlabel("Breakeven %")
+        ax.set_zlim(1.0, 4.0)
+        ax.view_init(elev=25, azim=-55)
+        regime = "RISING" if be_5y > 2.7 else "FALLING" if be_5y < 2.3 else "STABLE"
+        _hud(ax, [
+            f"5Y Breakeven  = {be_5y:.2f}%",
+            f"30Y Breakeven = {be_30y:.2f}%",
+            f"Slope         = {(be_30y-be_5y)*100:+5.0f} bp",
+            f"Regime        = {regime}",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "tips_spreads")
+
+
+# ---------------------------------------------------------------------
+# 12. VIX Term Structure
+# ---------------------------------------------------------------------
+def vix_term_structure():
+    """VIX futures term structure: spot/1m/3m/6m. Animate spot VIX
+    spiking and curve flipping from contango to backwardation."""
+    print("vix_term_structure...")
+    tenors = ["Spot", "1M", "3M", "6M", "9M"]
+    n = len(tenors)
+    xs = np.arange(n)
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "VIX Futures Term Structure")
+        spot = _ramp(frame, 12.0, 38.0)
+        # Long-dated futures mean-revert toward 18; spot diverges
+        far_anchor = 18.0
+        decay = np.array([0, 0.3, 0.55, 0.75, 0.85])
+        levels = spot * (1 - decay) + far_anchor * decay
+        # Color by structure
+        is_backward = spot > far_anchor + 2
+        bar_colors = ["#ff4444" if is_backward else "#4CAF50"] * n
+        ax.bar3d(xs, np.zeros(n), np.zeros(n),
+                 0.6, 0.6, levels,
+                 color=bar_colors, alpha=0.9, shade=True)
+        for x, lv in zip(xs, levels):
+            ax.text(x + 0.3, 0.3, lv + 0.5, f"{lv:.1f}",
+                    color="white", fontsize=8, ha="center")
+        ax.set_xticks(xs)
+        ax.set_xticklabels(tenors)
+        ax.set_yticks([])
+        ax.set_zlim(0, 45)
+        ax.set_zlabel("VIX Level")
+        ax.view_init(elev=25, azim=-55)
+        regime = ("EXTREME" if spot > 35 else "HIGH" if spot > 25
+                  else "NORMAL" if spot > 15 else "LOW")
+        structure = "BACKWARDATION" if is_backward else "CONTANGO"
+        _hud(ax, [
+            f"Spot VIX  = {spot:5.2f}",
+            f"6M Futures = {levels[3]:5.2f}",
+            f"Regime     = {regime}",
+            f"Structure  = {structure}",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "vix_term_structure")
+
+
+# ---------------------------------------------------------------------
+# 13. Live Fed Funds Target Rate (DFEDTARU)
+# ---------------------------------------------------------------------
+def fed_funds_target_rate():
+    """Step plot of FFTR over last 24 months. Animate cursor walking
+    through the rate-hiking → rate-cutting cycle."""
+    print("fed_funds_target_rate...")
+    n_months = 24
+    months = np.arange(n_months)
+    # Synthesize a hike-then-cut cycle: 2.5% → 5.5% → 4.0%
+    rate = np.concatenate([
+        np.linspace(2.5, 5.5, 12),
+        np.full(6, 5.5),
+        np.linspace(5.5, 4.0, 6),
+    ])
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Live Fed Funds Target Rate (DFEDTARU)")
+        cursor = int((frame / FRAMES) * (n_months - 1))
+        ys = np.zeros(n_months)
+        # Bars; the bar at the cursor is highlighted
+        colors = ["#2196F3"] * n_months
+        colors[cursor] = "#00E5FF"
+        ax.bar3d(months, ys, np.zeros(n_months),
+                 0.7, 0.4, rate,
+                 color=colors, alpha=0.9, shade=True)
+        # "today" cursor line
+        ax.plot([cursor, cursor], [0.5, 0.5], [0, rate[cursor] + 0.5],
+                color="#00E5FF", linewidth=2)
+        ax.set_xlabel("Month index")
+        ax.set_yticks([])
+        ax.set_zlim(0, 7)
+        ax.set_zlabel("FFTR %")
+        ax.view_init(elev=25, azim=-55)
+        cycle = ("HIKING" if cursor < 12 else
+                 "PEAK" if cursor < 18 else "CUTTING")
+        _hud(ax, [
+            f"Cursor    = month {cursor+1}/{n_months}",
+            f"FFTR now  = {rate[cursor]:.2f}%",
+            f"FFTR start = {rate[0]:.2f}%",
+            f"Cycle     = {cycle}",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "fed_funds_target_rate")
+
+
+# ---------------------------------------------------------------------
+# 14. Manual Consensus Override
+# ---------------------------------------------------------------------
+def consensus_override():
+    """Three side-by-side bars per indicator: Static Fallback / FRED Proxy
+    / User Override. Animate: override toggles on, bars realign."""
+    print("consensus_override...")
+    indicators = ["CPI MoM", "NFP", "Fed Funds", "Core PCE", "Unemp."]
+    static_v   = np.array([0.30, 180,  5.25, 0.20, 4.20])
+    fred_v     = np.array([0.18, 232,  4.50, 0.16, 4.05])
+    override_v = np.array([0.25, 175,  4.50, 0.18, 4.10])
+    # Normalize each indicator to ~0-10 scale per-indicator
+    span = np.maximum(np.abs(static_v - fred_v) * 4, 0.1)
+
+    n = len(indicators)
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def _norm(v):
+        return ((v - fred_v) / span) * 3 + 5
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Consensus Sources: Fallback vs FRED vs Override")
+        # Variable: override fades in over second half of animation
+        ovr_fade = max(0, (frame / FRAMES - 0.4)) / 0.6
+        ovr_fade = min(ovr_fade, 1.0)
+        for i, label in enumerate(indicators):
+            # Static at y=0, FRED at y=1, Override at y=2
+            ax.bar3d([i], [0], [0], 0.5, 0.5, _norm(static_v)[i],
+                     color="#9E9E9E", alpha=0.9, shade=True)
+            ax.bar3d([i], [1], [0], 0.5, 0.5, _norm(fred_v)[i],
+                     color="#2196F3", alpha=0.9, shade=True)
+            ax.bar3d([i], [2], [0], 0.5, 0.5,
+                     _norm(override_v)[i] * ovr_fade,
+                     color="#FFC107", alpha=0.9, shade=True)
+        ax.set_xticks(np.arange(n))
+        ax.set_xticklabels(indicators, fontsize=7, rotation=20)
+        ax.set_yticks([0.25, 1.25, 2.25])
+        ax.set_yticklabels(["Static", "FRED", "Override"], fontsize=8)
+        ax.set_zlim(0, 12)
+        ax.set_zlabel("Normalized")
+        ax.view_init(elev=25, azim=-60)
+        active = "Override ON" if ovr_fade > 0.5 else (
+            "Override loading…" if ovr_fade > 0 else "Override OFF")
+        _hud(ax, [
+            f"Active source = {'OVERRIDE' if ovr_fade>0.5 else 'FRED'}",
+            f"{active}",
+            f"CPI MoM: static {static_v[0]:.2f} | "
+            f"FRED {fred_v[0]:.2f} | OVR {override_v[0]:.2f}",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "consensus_override")
+
+
+# ---------------------------------------------------------------------
+# 15. Historical Sensitivity Matrix
+# ---------------------------------------------------------------------
+def sensitivity_matrix():
+    """3D heatmap-style bars: events × instruments → |sensitivity|.
+    Animate one event row highlighted at a time."""
+    print("sensitivity_matrix...")
+    events = ["CPI MoM", "Core CPI", "NFP", "Unemp", "FOMC", "Core PCE"]
+    instruments = ["SPY", "QQQ", "TLT", "DXY", "EUR", "GLD"]
+    # From surprise_calculator.SENSITIVITY_MATRIX
+    M = np.array([
+        [-0.40, -0.55, -0.60,  0.25, -0.22, -0.35],   # CPI MoM
+        [-0.45, -0.60, -0.65,  0.28, -0.24,  0.00],   # Core CPI
+        [ 0.25,  0.30, -0.35,  0.30, -0.25,  0.00],   # NFP
+        [-0.20, -0.25,  0.30, -0.20,  0.18,  0.00],   # Unemp
+        [-0.60, -0.80, -0.90,  0.45, -0.40, -0.55],   # FOMC
+        [-0.35, -0.45, -0.50,  0.22,  0.00,  0.00],   # PCE
+    ])
+
+    nE, nI = M.shape
+    X, Y = np.meshgrid(np.arange(nI), np.arange(nE))
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Sensitivity Matrix |1σ Surprise → Move %|")
+        active_row = int((frame / FRAMES) * nE) % nE
+        # Bars; highlight active row by scaling brightness
+        for r in range(nE):
+            for c in range(nI):
+                h = abs(M[r, c])
+                color = cm.RdYlGn((M[r, c] + 1) / 2)
+                alpha = 0.95 if r == active_row else 0.4
+                ax.bar3d(c, r, 0, 0.7, 0.7, h,
+                         color=color, alpha=alpha, shade=True)
+        ax.set_xticks(np.arange(nI))
+        ax.set_xticklabels(instruments)
+        ax.set_yticks(np.arange(nE))
+        ax.set_yticklabels(events, fontsize=8)
+        ax.set_zlim(0, 1.0)
+        ax.set_zlabel("|sensitivity|")
+        ax.view_init(elev=30, azim=-55)
+        row_vals = ", ".join(
+            f"{instruments[c]}={M[active_row,c]:+.2f}"
+            for c in range(nI) if abs(M[active_row, c]) > 0.01
+        )
+        _hud(ax, [
+            f"Selected event = {events[active_row]}",
+            f"  {row_vals}",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "sensitivity_matrix")
+
+
+# ---------------------------------------------------------------------
+# 16. Surprise Z-Score Engine
+# ---------------------------------------------------------------------
+def surprise_z_score():
+    """Bell curve in 3D with 7 colored buckets. A marker (the actual
+    release) sweeps across z-scores -3 → +3."""
+    print("surprise_z_score...")
+    z = np.linspace(-3.5, 3.5, 200)
+    pdf = np.exp(-0.5 * z**2) / np.sqrt(2 * np.pi)
+
+    # Bucket boundaries: -2, -1, -0.5, +0.5, +1, +2
+    bucket_edges = [-3.5, -2, -1, -0.5, 0.5, 1, 2, 3.5]
+    bucket_colors = ["#8b0000", "#ff4444", "#ffbb33", "#9E9E9E",
+                     "#cddc39", "#4CAF50", "#2e7d32"]
+    bucket_labels = ["large_miss", "miss", "slight_miss", "inline",
+                     "slight_beat", "beat", "large_beat"]
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Surprise Z-Score Buckets (large_miss ↔ large_beat)")
+        # Animated: marker walks across z-axis -2.5 → +2.5
+        z_now = -2.5 + (frame / FRAMES) * 5
+        # Find bucket index
+        bidx = 0
+        for i in range(len(bucket_edges) - 1):
+            if bucket_edges[i] <= z_now < bucket_edges[i + 1]:
+                bidx = i
+                break
+        # Plot per-bucket colored ribbons (z, height=pdf, depth)
+        for i in range(len(bucket_edges) - 1):
+            mask = (z >= bucket_edges[i]) & (z < bucket_edges[i + 1])
+            if not mask.any():
+                continue
+            z_seg = z[mask]
+            p_seg = pdf[mask]
+            depth = np.full_like(z_seg, 0)
+            color = bucket_colors[i]
+            alpha = 0.95 if i == bidx else 0.4
+            ax.plot(z_seg, depth, p_seg, color=color, lw=3, alpha=alpha)
+            # Filled "wall" via bar3d-style ribbon
+            for zs, ps in zip(z_seg[::3], p_seg[::3]):
+                ax.bar3d([zs], [-0.2], [0], 0.05, 0.4, ps,
+                         color=color, alpha=alpha * 0.5, shade=False)
+        # Marker (the current release)
+        z_pdf = np.exp(-0.5 * z_now**2) / np.sqrt(2 * np.pi)
+        ax.scatter([z_now], [0], [z_pdf], color="white",
+                   s=120, edgecolor="#00E5FF", linewidth=2)
+        ax.plot([z_now, z_now], [0, 0], [0, z_pdf],
+                color="#00E5FF", linewidth=1.5, linestyle="--")
+        ax.set_xlabel("Z-Score")
+        ax.set_yticks([])
+        ax.set_xlim(-3.5, 3.5)
+        ax.set_ylim(-0.5, 0.5)
+        ax.set_zlim(0, 0.5)
+        ax.set_zlabel("Density")
+        ax.view_init(elev=25, azim=-55)
+        _hud(ax, [
+            f"Actual − Consensus = {z_now:+.2f}σ",
+            f"Bucket             = {bucket_labels[bidx]}",
+            f"P(≥ this z)        = {(1 - 0.5*(1+np.tanh(z_now*0.798)))*100:4.1f}%",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "surprise_z_score")
+
+
+# ---------------------------------------------------------------------
+# 17. Event-Type Multipliers
+# ---------------------------------------------------------------------
+def event_type_multipliers():
+    """Bars per event category showing the magnitude multiplier
+    (1.5x inflation, 2.0x rates, 1.3x employment, 1.1x growth, 0.9x PMI).
+    Animate one category highlighted at a time."""
+    print("event_type_multipliers...")
+    cats = ["Inflation", "Rates", "Employment", "Growth", "PMI"]
+    mults = np.array([1.5, 2.0, 1.3, 1.1, 0.9])
+    examples = ["CPI/PCE", "FOMC", "NFP/Unemp", "GDP/Retail", "ISM"]
+    n = len(cats)
+    xs = np.arange(n)
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Event-Type Volatility Multipliers")
+        active = int((frame / FRAMES) * n) % n
+        colors = ["#9E9E9E"] * n
+        colors[active] = "#FFC107"
+        ax.bar3d(xs, np.zeros(n), np.zeros(n),
+                 0.6, 0.6, mults,
+                 color=colors, alpha=0.9, shade=True)
+        for i, m in enumerate(mults):
+            ax.text(i + 0.3, 0.3, m + 0.07, f"{m}×",
+                    color="white", fontsize=9, ha="center")
+        ax.set_xticks(xs)
+        ax.set_xticklabels(cats, fontsize=8)
+        ax.set_yticks([])
+        ax.set_zlim(0, 2.4)
+        ax.set_zlabel("Multiplier")
+        ax.view_init(elev=25, azim=-55)
+        _hud(ax, [
+            f"Active category = {cats[active]}",
+            f"Example events  = {examples[active]}",
+            f"Multiplier      = {mults[active]:.1f}× baseline",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "event_type_multipliers")
+
+
+# ---------------------------------------------------------------------
+# 18. Cross-Asset Type Scaling
+# ---------------------------------------------------------------------
+def cross_asset_scaling():
+    """A single 1σ surprise propagates through asset-class scaling
+    factors. Bars: 4 asset classes. Animate: surprise size sweeps -2σ → +2σ."""
+    print("cross_asset_scaling...")
+    asset_classes = ["Equity", "Bonds", "FX", "Commodity"]
+    type_mult = np.array([1.0, 0.7, 0.5, 0.8])
+    colors_ac = ["#4CAF50", "#2196F3", "#FF9800", "#9C27B0"]
+    n = len(asset_classes)
+    xs = np.arange(n)
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Cross-Asset Type Scaling for a 1σ Surprise")
+        # Animated: surprise sweeps -2σ → +2σ
+        z = -2 + (frame / FRAMES) * 4
+        baseline = 1.1  # daily SPX σ
+        moves = baseline * type_mult * z
+        ax.bar3d(xs, np.zeros(n), np.zeros(n),
+                 0.6, 0.6, moves,
+                 color=colors_ac, alpha=0.9, shade=True)
+        for i, m in enumerate(moves):
+            ax.text(i + 0.3, 0.3, m + np.sign(m) * 0.15,
+                    f"{m:+.2f}%", color="white",
+                    fontsize=8, ha="center")
+        ax.set_xticks(xs)
+        ax.set_xticklabels(asset_classes)
+        ax.set_yticks([])
+        ax.set_zlim(-3, 3)
+        ax.set_zlabel("Expected Move %")
+        ax.view_init(elev=25, azim=-55)
+        _hud(ax, [
+            f"Surprise z       = {z:+.2f}σ",
+            f"Baseline (SPX σ) = {baseline:.2f}%",
+            f"Scaling: eq 1.0 / fi 0.7 / fx 0.5 / cm 0.8",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "cross_asset_scaling")
+
+
+# ---------------------------------------------------------------------
+# 19. Market Regime Classifier
+# ---------------------------------------------------------------------
+def market_regime():
+    """3D landscape with 4 quadrants: VIX vs yield-curve slope. Marker
+    walks across the quadrants showing regime transitions."""
+    print("market_regime...")
+    vix = np.linspace(8, 40, 60)
+    slope = np.linspace(-1.5, 2.5, 60)
+    V, S = np.meshgrid(vix, slope)
+    # Regime height: highest in the corners (extreme regimes)
+    Z = np.tanh((V - 22) / 8)**2 + np.tanh(S / 1.2)**2
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Market Regime: VIX × Yield-Curve Slope")
+        ax.plot_surface(V, S, Z, cmap=cm.RdYlGn_r, alpha=0.6,
+                        linewidth=0, antialiased=True)
+        # Animated marker tracing a path: low-vol expansion →
+        # rising VIX → recession risk → recovery
+        t = frame / FRAMES * 2 * np.pi
+        vix_now = 22 + 12 * np.sin(t)
+        slope_now = 0.8 - 1.6 * np.sin(t * 0.5)
+        z_now = (np.tanh((vix_now - 22) / 8)**2
+                 + np.tanh(slope_now / 1.2)**2)
+        ax.scatter([vix_now], [slope_now], [z_now + 0.05],
+                   color="#00E5FF", s=120, edgecolor="white", linewidth=1.5)
+        ax.plot([vix_now, vix_now], [slope_now, slope_now], [0, z_now + 0.05],
+                color="#00E5FF", linewidth=1.5, linestyle="--")
+        ax.set_xlabel("VIX")
+        ax.set_ylabel("Curve slope (10Y-3M, %)")
+        ax.set_zlabel("Regime stress")
+        ax.set_zlim(0, 2.2)
+        ax.view_init(elev=28, azim=-60)
+        # Classify
+        risk = "RISK_OFF" if vix_now > 25 else "RISK_ON" if vix_now < 15 else "NEUTRAL"
+        growth = "RECESSION_RISK" if slope_now < 0 else "EXPANSION"
+        _hud(ax, [
+            f"VIX        = {vix_now:5.2f}",
+            f"Slope 10-3 = {slope_now:+.2f}%",
+            f"Risk regime    = {risk}",
+            f"Growth regime  = {growth}",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "market_regime")
+
+
+# ---------------------------------------------------------------------
+# 20. Implied-Expectation Reverse-Engineering
+# ---------------------------------------------------------------------
+def implied_expectation():
+    """Pre-release moves across instruments → inferred consensus z-score
+    via inverse sensitivity. Animate: market moves change → inferred
+    z updates."""
+    print("implied_expectation...")
+    instruments = ["SPY", "QQQ", "TLT", "DXY", "EUR", "GLD"]
+    # Sensitivities for CPI MoM (from SENSITIVITY_MATRIX)
+    sens = np.array([-0.40, -0.55, -0.60, 0.25, -0.22, -0.35])
+    n = len(instruments)
+    xs = np.arange(n)
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Implied Consensus: Reverse-Engineered from Pre-Release Moves")
+        # Animated true z-score that the market is slowly pricing in
+        true_z = 1.5 * np.sin(frame / FRAMES * 2 * np.pi)
+        # Pre-release moves = sensitivity × true_z + small noise
+        rng = np.random.default_rng(frame)
+        moves = sens * true_z + rng.normal(0, 0.05, n)
+        # Inferred z per instrument (inverse) and aggregate
+        inferred_per = moves / sens
+        inferred_z = np.mean(inferred_per)
+        # Bars: pre-release moves
+        bar_colors = ["#4CAF50" if m > 0 else "#ff4444" for m in moves]
+        ax.bar3d(xs, np.zeros(n), np.zeros(n),
+                 0.6, 0.6, moves,
+                 color=bar_colors, alpha=0.9, shade=True)
+        for i, m in enumerate(moves):
+            ax.text(i + 0.3, 0.3, m + np.sign(m) * 0.05,
+                    f"{m:+.2f}%", color="white",
+                    fontsize=7, ha="center")
+        ax.set_xticks(xs)
+        ax.set_xticklabels(instruments)
+        ax.set_yticks([])
+        ax.set_zlim(-1.2, 1.2)
+        ax.set_zlabel("Pre-release move %")
+        ax.view_init(elev=25, azim=-55)
+        _hud(ax, [
+            f"True surprise z    = {true_z:+.2f}σ  (hidden)",
+            f"Inferred z (avg)   = {inferred_z:+.2f}σ",
+            f"Confidence         = HIGH (n={n} instruments)",
+            f"Implied direction  = {'BEAT' if inferred_z>0 else 'MISS'}",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "implied_expectation")
+
+
+# ---------------------------------------------------------------------
+# 21. Combined Multi-Surprise Impact
+# ---------------------------------------------------------------------
+def combined_surprises():
+    """Stacked 3D bars per instrument: contributions from CPI MoM, Core
+    CPI MoM, and Retail Sales (all released same morning). Animate:
+    events stack on one at a time."""
+    print("combined_surprises...")
+    instruments = ["SPY", "QQQ", "TLT", "DXY"]
+    n = len(instruments)
+    xs = np.arange(n)
+    # Per-event impacts (move % at the same z=+1 surprise)
+    cpi_imp     = np.array([-0.40, -0.55, -0.60,  0.25])
+    core_imp    = np.array([-0.45, -0.60, -0.65,  0.28])
+    retail_imp  = np.array([ 0.25,  0.30,  0.05,  0.15])
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Combined Impact: 3 Releases Same Morning")
+        # Stage: at frame=0 only CPI; mid: +Core CPI; late: +Retail
+        stage = (frame / FRAMES) * 3
+        s_cpi    = min(stage, 1.0)
+        s_core   = max(0, min(stage - 1, 1.0))
+        s_retail = max(0, min(stage - 2, 1.0))
+        # Stack each layer
+        ax.bar3d(xs, np.zeros(n), np.zeros(n),
+                 0.5, 0.5, cpi_imp * s_cpi,
+                 color="#ff4444", alpha=0.9, shade=True)
+        ax.bar3d(xs, np.zeros(n), cpi_imp * s_cpi,
+                 0.5, 0.5, core_imp * s_core,
+                 color="#FFC107", alpha=0.9, shade=True)
+        ax.bar3d(xs, np.zeros(n),
+                 cpi_imp * s_cpi + core_imp * s_core,
+                 0.5, 0.5, retail_imp * s_retail,
+                 color="#4CAF50", alpha=0.9, shade=True)
+        # Total label
+        total = cpi_imp * s_cpi + core_imp * s_core + retail_imp * s_retail
+        for i, t in enumerate(total):
+            ax.text(i + 0.25, 0.25, t + np.sign(t) * 0.08,
+                    f"{t:+.2f}%", color="white",
+                    fontsize=8, ha="center", weight="bold")
+        ax.set_xticks(xs)
+        ax.set_xticklabels(instruments)
+        ax.set_yticks([])
+        ax.set_zlim(-2.0, 1.5)
+        ax.set_zlabel("Combined move %")
+        ax.view_init(elev=25, azim=-55)
+        active = []
+        if s_cpi > 0:    active.append("CPI MoM")
+        if s_core > 0:   active.append("Core CPI")
+        if s_retail > 0: active.append("Retail Sales")
+        _hud(ax, [
+            f"Active releases = {', '.join(active)}",
+            f"SPY total       = {total[0]:+.2f}%",
+            f"TLT total       = {total[2]:+.2f}%",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "combined_surprises")
+
+
+# ---------------------------------------------------------------------
+# 22. Cross-Instrument Correlation Matrix
+# ---------------------------------------------------------------------
+def correlation_matrix():
+    """Rolling correlation 3D heatmap. Animate: rolling window slides
+    through time, correlations shift as regime changes."""
+    print("correlation_matrix...")
+    instruments = ["SPY", "QQQ", "TLT", "DXY", "EUR", "GLD"]
+    n = len(instruments)
+    X, Y = np.meshgrid(np.arange(n), np.arange(n))
+
+    fig = plt.figure(figsize=SIZE, dpi=DPI)
+    ax = fig.add_subplot(111, projection="3d")
+
+    def update(frame):
+        ax.clear()
+        _setup_3d(ax, "Cross-Instrument Rolling Correlation Matrix")
+        phase = frame / FRAMES * 2 * np.pi
+        # Synthetic regime shift: in risk-on, SPY-QQQ ~+0.9, SPY-TLT ~-0.2,
+        # in risk-off, correlations compress toward +1 (everything sells)
+        risk_off = 0.5 + 0.4 * np.sin(phase)
+        # Build correlation matrix
+        C = np.array([
+            [ 1.0,  0.92,  -0.20 + risk_off*0.4,  -0.30,  -0.55, -0.10],
+            [ 0.92, 1.0,   -0.25 + risk_off*0.4,  -0.28,  -0.50, -0.05],
+            [-0.20+risk_off*0.4, -0.25+risk_off*0.4, 1.0, -0.10, 0.10, 0.30],
+            [-0.30, -0.28, -0.10, 1.0,  -0.85,  0.05],
+            [-0.55, -0.50,  0.10, -0.85, 1.0,   0.05],
+            [-0.10, -0.05,  0.30,  0.05, 0.05,  1.0],
+        ])
+        # Render as bars
+        for i in range(n):
+            for j in range(n):
+                v = C[i, j]
+                color = cm.RdYlGn((v + 1) / 2)
+                ax.bar3d(j, i, 0, 0.7, 0.7, abs(v) + 0.01,
+                         color=color, alpha=0.9, shade=True)
+        ax.set_xticks(np.arange(n))
+        ax.set_xticklabels(instruments, fontsize=7)
+        ax.set_yticks(np.arange(n))
+        ax.set_yticklabels(instruments, fontsize=7)
+        ax.set_zlim(0, 1.1)
+        ax.set_zlabel("|correlation|")
+        ax.view_init(elev=35, azim=-60)
+        regime = "RISK_OFF" if risk_off > 0.7 else "RISK_ON" if risk_off < 0.3 else "NEUTRAL"
+        _hud(ax, [
+            f"Regime          = {regime}",
+            f"SPY-TLT corr    = {C[0,2]:+.2f}",
+            f"SPY-QQQ corr    = {C[0,1]:+.2f}",
+            f"DXY-EUR corr    = {C[3,4]:+.2f}",
+        ])
+        return ()
+
+    anim = FuncAnimation(fig, update, frames=FRAMES, blit=False)
+    _save(fig, anim, "correlation_matrix")
+
+
 def main():
     print(f"Generating GIFs into {OUTPUT_DIR}\n")
     market_implied_predictions()
@@ -571,6 +1279,19 @@ def main():
     risk_assessment()
     yield_curve()
     interactive_dashboard()
+    fed_funds_futures()
+    tips_spreads()
+    vix_term_structure()
+    fed_funds_target_rate()
+    consensus_override()
+    sensitivity_matrix()
+    surprise_z_score()
+    event_type_multipliers()
+    cross_asset_scaling()
+    market_regime()
+    implied_expectation()
+    combined_surprises()
+    correlation_matrix()
     print("\nDone.")
 
 
