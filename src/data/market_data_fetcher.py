@@ -79,6 +79,13 @@ class MarketDataFetcher:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._price_cache: Dict[str, pd.DataFrame] = {}
+        # Live Fed Funds Target rate (set externally by PredictionEngine
+        # from FRED's DFEDTARU). None means "use the static fallback".
+        self._current_fed_rate: Optional[float] = None
+
+    def set_current_fed_rate(self, rate: Optional[float]) -> None:
+        """Inject the live Fed Funds Target rate (FRED DFEDTARU)."""
+        self._current_fed_rate = rate
 
     def _get_cache_path(self, symbol: str, data_type: str) -> Path:
         """Get cache file path."""
@@ -135,8 +142,11 @@ class MarketDataFetcher:
             '6mo': 180, '1y': 365, '2y': 730, '5y': 1825
         }.get(period, 730)
 
+        # Normalize to midnight so multiple calls in the same run share an
+        # identical date index (otherwise sub-second drift breaks
+        # `index.intersection` between e.g. TLT and TIP).
         dates = pd.date_range(
-            end=datetime.now(),
+            end=pd.Timestamp.today().normalize(),
             periods=period_days,
             freq='B'  # Business days
         )
@@ -327,8 +337,8 @@ class MarketDataFetcher:
 
         Uses Fed Funds Futures to derive expected rate path.
         """
-        # Get current effective rate
-        current_rate = 5.25  # Default, would fetch from FRED
+        # Live rate from FRED if injected, else static fallback.
+        current_rate = self._current_fed_rate if self._current_fed_rate is not None else 5.25
 
         # Fetch Fed Funds Futures if available
         ff_data = self.fetch_price_data('ZQ=F', period='1y', interval='1d')

@@ -114,13 +114,31 @@ class PredictionEngine:
         'pmi': ['ISM', 'PMI', 'Manufacturing', 'Services'],
     }
 
-    def __init__(self):
-        """Initialize the prediction engine."""
+    def __init__(self, force_refresh: bool = False):
+        """Initialize the prediction engine.
+
+        Args:
+            force_refresh: bypass the FRED 24h disk cache so consensus and
+                Fed Funds Rate are pulled fresh from the network.
+        """
         self.market_fetcher = MarketDataFetcher()
-        self.calendar = EconomicCalendar()
+        self.calendar = EconomicCalendar(auto_refresh=True, force_refresh=force_refresh)
         self.impact_analyzer = ImpactAnalyzer()
         self.surprise_calculator = SurpriseCalculator()
         self._cache: Dict[str, Any] = {}
+
+        # Inject the live Fed Funds Target rate from FRED so that
+        # `calculate_fed_funds_expectations()` no longer hard-codes 5.25.
+        try:
+            from ..data.consensus_loader import ConsensusLoader
+            from ..data.macro_data_fetcher import MacroDataFetcher
+            macro = MacroDataFetcher()
+            live_rate = ConsensusLoader(macro_fetcher=macro).get_current_fed_funds_rate()
+            if live_rate is not None:
+                self.market_fetcher.set_current_fed_rate(live_rate)
+                logger.info(f"Live Fed Funds Target Rate from FRED: {live_rate:.2f}%")
+        except Exception as exc:
+            logger.warning(f"Could not inject live Fed rate: {exc}")
 
     def get_market_implied_expectations(self) -> Dict[str, Any]:
         """Get current market-implied expectations from various instruments.

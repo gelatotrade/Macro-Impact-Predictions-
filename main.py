@@ -31,11 +31,26 @@ def run_dashboard(host: str = "127.0.0.1", port: int = 8050, debug: bool = True)
     dashboard.run(debug=debug)
 
 
-def run_predictions(days_ahead: int = 7, output_format: str = "console"):
+def run_predictions(days_ahead: int = 7, output_format: str = "console",
+                    force_refresh: bool = False):
     """Run predictions for upcoming events and display results."""
     logger.info(f"Generating predictions for next {days_ahead} days...")
 
-    engine = PredictionEngine()
+    engine = PredictionEngine(force_refresh=force_refresh)
+
+    now = datetime.now()
+    cal = engine.calendar
+    print("\n" + "="*80)
+    print("MACRO EVENT IMPACT PREDICTIONS")
+    print("Based on Market-Implied Expectations (VIX, Yield Curve, Fed Futures)")
+    print("="*80)
+    print(f"Run timestamp:    {now.strftime('%Y-%m-%d %H:%M:%S')} (local)")
+    print(f"Predicting from:  {now.strftime('%Y-%m-%d')} forward (next {days_ahead} days)")
+    print(f"Consensus source: {cal.refresh_source.upper()}"
+          + (f"  (refreshed at {cal.last_refresh})" if cal.last_refresh else ""))
+    print(f"Market data:      yfinance (live)")
+    print("="*80)
+
     predictions = engine.get_upcoming_predictions(
         days_ahead=days_ahead,
         min_impact=EventImpact.HIGH
@@ -47,11 +62,6 @@ def run_predictions(days_ahead: int = 7, output_format: str = "console"):
 
     # Get market expectations
     market_exp = engine.get_market_implied_expectations()
-
-    print("\n" + "="*80)
-    print("MACRO EVENT IMPACT PREDICTIONS")
-    print("Based on Market-Implied Expectations (VIX, Yield Curve, Fed Futures)")
-    print("="*80)
 
     print(f"\n📊 CURRENT MARKET EXPECTATIONS:")
     print(f"   VIX: {market_exp.get('vix_current', 'N/A'):.1f} ({market_exp.get('vix_regime', 'N/A')} volatility)")
@@ -120,9 +130,9 @@ def run_predictions(days_ahead: int = 7, output_format: str = "console"):
             print(f"📊 Chart saved to: {path}")
 
 
-def quick_prediction(event_type: str = None):
+def quick_prediction(event_type: str = None, force_refresh: bool = False):
     """Get quick prediction for next event."""
-    engine = PredictionEngine()
+    engine = PredictionEngine(force_refresh=force_refresh)
 
     pred = engine.get_prediction_for_next_event(event_type)
 
@@ -164,11 +174,15 @@ Examples:
     pred_parser.add_argument('-d', '--days', type=int, default=7, help='Days ahead to look')
     pred_parser.add_argument('--html', action='store_true', help='Generate HTML charts')
     pred_parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
+    pred_parser.add_argument('--refresh', action='store_true',
+                             help='Bypass the FRED 24h cache and pull fresh consensus')
 
     # Quick command
     quick_parser = subparsers.add_parser('quick', help='Quick prediction for next event')
     quick_parser.add_argument('--type', choices=['inflation', 'rates', 'employment', 'growth', 'pmi'],
                               help='Filter by event type')
+    quick_parser.add_argument('--refresh', action='store_true',
+                              help='Bypass the FRED 24h cache and pull fresh consensus')
 
     args = parser.parse_args()
 
@@ -184,9 +198,10 @@ Examples:
         )
     elif args.command == 'predict':
         output_format = 'html' if args.html else 'console'
-        run_predictions(days_ahead=args.days, output_format=output_format)
+        run_predictions(days_ahead=args.days, output_format=output_format,
+                        force_refresh=args.refresh)
     elif args.command == 'quick':
-        quick_prediction(event_type=args.type)
+        quick_prediction(event_type=args.type, force_refresh=args.refresh)
     else:
         # Default: show predictions
         run_predictions()

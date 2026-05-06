@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy this file to data/consensus_overrides.json and edit the values you want to pin. Anything in here beats both the FRED-derived consensus proxy and the static fallback. Useful right before a known release: paste in the latest ForexFactory / Investing.com consensus.",
+
+  "CPI MoM":          { "consensus": 0.30, "previous": 0.20 },
+  "CPI YoY":          { "consensus": 3.10, "previous": 3.00 },
+  "Core CPI MoM":     { "consensus": 0.30, "previous": 0.30 },
+  "NFP":              { "consensus": 175,  "previous": 142  },
+  "Unemployment Rate":{ "consensus": 4.20, "previous": 4.10 },
+  "Fed Funds Rate":   { "consensus": 4.50, "previous": 4.50 }
+}

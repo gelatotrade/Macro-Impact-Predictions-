@@ -28,6 +28,10 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 OUTPUT_DIR = Path(__file__).parent / "visualizations"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Bump this suffix when you change the GIF rendering — it busts the
+# CDN/browser cache because the README image URLs change with it.
+GIF_SUFFIX = "_v2"
+
 plt.rcParams.update({
     "axes.facecolor": "#1a1a2e",
     "figure.facecolor": "#1a1a2e",
@@ -72,7 +76,7 @@ def _hud(ax, lines, x=0.02, y=0.98):
 
 
 def _save(fig, anim, name):
-    out = OUTPUT_DIR / f"{name}.gif"
+    out = OUTPUT_DIR / f"{name}{GIF_SUFFIX}.gif"
     anim.save(str(out), writer=PillowWriter(fps=FPS), dpi=DPI)
     plt.close(fig)
     print(f"  saved {out.name}")

@@ -11,7 +11,7 @@ A real-time system for predicting how macroeconomic events (CPI, NFP, PMI, inter
 ### Market-Implied Predictions
 Uses VIX, yield curve, Fed Funds Futures, and TIPS spreads to derive expected moves.
 
-![Market-Implied Predictions](assets/visualizations/market_implied_predictions.gif)
+![Market-Implied Predictions](assets/visualizations/market_implied_predictions_v2.gif)
 
 **What you see.** The surface is the model output `Expected Move % = f(VIX, P(Fed Cut))`,
 computed as `(VIX / √252) · (1 + 0.6 · P_cut) · vol_factor`. The green dot marks the
@@ -24,7 +24,7 @@ because every cell is multiplied by `VIX / 18`.
 ### Real-Time Analysis
 Fetches current market data to generate up-to-date predictions.
 
-![Real-Time Analysis](assets/visualizations/real_time_analysis.gif)
+![Real-Time Analysis](assets/visualizations/real_time_analysis_v2.gif)
 
 **What you see.** A rolling 2D grid of `time × instrument` with the *expected
 intraday move* as height. The wave speed scales with the live VIX tick — high
@@ -36,7 +36,7 @@ VIX = faster, sharper wiggles.
 ### Multi-Asset Coverage
 Predicts impacts on equities, bonds, FX, and commodities.
 
-![Multi-Asset Coverage](assets/visualizations/multi_asset_coverage.gif)
+![Multi-Asset Coverage](assets/visualizations/multi_asset_coverage_v2.gif)
 
 **What you see.** One bar per tracked instrument (SPY, QQQ, IWM, TLT, IEF, DXY,
 EUR, JPY, Gold). Bar height = expected 1σ move %. Colors mark asset class:
@@ -51,7 +51,7 @@ daily SPX σ.
 ### Scenario Analysis
 Shows expected moves for different outcome scenarios (beat/miss/inline).
 
-![Scenario Analysis](assets/visualizations/scenario_analysis.gif)
+![Scenario Analysis](assets/visualizations/scenario_analysis_v2.gif)
 
 **What you see.** Surface of *Scenario × Instrument → Move %*. Five outcome
 scenarios on Y (Large Miss → Large Beat), five instruments on X. Color codes
@@ -65,7 +65,7 @@ is bearish for risk assets, while for growth events a beat is bullish.
 ### Probability Distributions
 Full probability density across implied volatility regimes.
 
-![Probability Distribution](assets/visualizations/probability_distribution.gif)
+![Probability Distribution](assets/visualizations/probability_distribution_v2.gif)
 
 **What you see.** A 3D normal-density surface. X = move %, Y = σ axis (vol),
 Z = density. The surface is `Z = N(X; μ, σ)` evaluated on the grid.
@@ -78,7 +78,7 @@ regime, driven by VIX) widens/narrows the surface.
 ### Interactive Dashboard
 Visualize predictions with an interactive web dashboard.
 
-![Interactive Dashboard](assets/visualizations/interactive_dashboard.gif)
+![Interactive Dashboard](assets/visualizations/interactive_dashboard_v2.gif)
 
 **What you see.** Six dashboard indicators as 3D towers in a 3 × 2 grid:
 `VIX`, `P(Fed Cut)%`, `10Y-3M spread`, `Breakeven Inflation`, `Risk score`,
@@ -91,7 +91,7 @@ exact behaviour of the live Dash front-end.
 ### Economic Calendar
 Tracks upcoming high-impact events with consensus estimates.
 
-![Economic Calendar](assets/visualizations/economic_calendar.gif)
+![Economic Calendar](assets/visualizations/economic_calendar_v2.gif)
 
 **What you see.** 14 upcoming events on the X axis, bar height = impact level
 (grey/yellow/orange/red = LOW/MED/HIGH/CRITICAL).
@@ -104,7 +104,7 @@ on deck.
 ### Risk Assessment
 Event risk surface combining VIX intensity and event impact magnitude.
 
-![Risk Assessment](assets/visualizations/risk_assessment.gif)
+![Risk Assessment](assets/visualizations/risk_assessment_v2.gif)
 
 **What you see.** A peak whose height = combined risk score, derived from
 `VIX/20 + impact_score/2` and bucketed into LOW / MEDIUM / HIGH / EXTREME
@@ -118,7 +118,7 @@ The implied event-impact label steps up in lockstep.
 ### Yield Curve Evolution
 Animated 3D yield curve evolution across tenors and time.
 
-![Yield Curve](assets/visualizations/yield_curve.gif)
+![Yield Curve](assets/visualizations/yield_curve_v2.gif)
 
 **What you see.** The Treasury curve as a surface across `Time × Tenor`. Z
 axis = yield %.
@@ -141,6 +141,50 @@ Unlike traditional systems that just show historical reactions, this system deri
 3. **Fed Funds Futures** → Probability of rate cuts/hikes
 4. **TIPS Spreads** → Inflation expectations
 5. **Historical Sensitivity** → Directional bias for different surprise outcomes
+
+## Data Freshness
+
+Every CLI run pulls live data — there are no hard-coded snapshot values left
+in the prediction path:
+
+| Layer                       | Source                                  | Refreshed                |
+|-----------------------------|-----------------------------------------|--------------------------|
+| Upcoming events / dates     | Generated from `datetime.now()`         | every run                |
+| `previous` (last release)   | FRED series (CPIAUCSL, PAYEMS, …)       | every run, 24h disk-cached |
+| `consensus` proxy           | FRED trailing-3-period mean             | every run, 24h disk-cached |
+| Fed Funds Target Rate       | FRED `DFEDTARU`                         | every run                |
+| VIX / yields / FX / gold    | yfinance live                           | every run, in-process    |
+| `consensus` manual override | `data/consensus_overrides.json`         | always wins              |
+
+Bypass the 24-hour FRED disk cache (e.g. on a release morning):
+
+```bash
+python main.py predict --refresh           # forces a fresh FRED pull
+python main.py quick --refresh
+```
+
+The CLI prints a banner at the top of every run so you can see exactly
+when the data was refreshed:
+
+```
+================================================================================
+MACRO EVENT IMPACT PREDICTIONS
+================================================================================
+Run timestamp:    2026-05-06 16:55:43 (local)
+Predicting from:  2026-05-06 forward (next 14 days)
+Consensus source: FRED  (refreshed at 2026-05-06T16:55:43)
+Market data:      yfinance (live)
+================================================================================
+```
+
+To pin specific consensus numbers (e.g. paste in the morning's ForexFactory /
+Investing.com consensus before a CPI print), copy
+`data/consensus_overrides.example.json` to `data/consensus_overrides.json`
+and edit the values. They override both the FRED proxy and the static fallback.
+
+If FRED is unreachable (no API key, network down, rate limit), the system
+falls back to the static defaults in `EconomicCalendar.CONSENSUS_ESTIMATES`
+and logs a warning.
 
 ## Installation
 

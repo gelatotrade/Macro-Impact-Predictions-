@@ -206,7 +206,9 @@ class EconomicCalendar:
         }
     }
 
-    # Consensus estimates (would be updated from live sources)
+    # Static *fallback* defaults. The instance-level `self.consensus_estimates`
+    # is refreshed from FRED on every construction (see `_refresh_from_fred`).
+    # These values are only used when FRED is unreachable.
     CONSENSUS_ESTIMATES = {
         'CPI MoM': {'consensus': 0.3, 'previous': 0.2, 'unit': '%'},
         'CPI YoY': {'consensus': 3.2, 'previous': 3.4, 'unit': '%'},
@@ -224,10 +226,65 @@ class EconomicCalendar:
         'Initial Claims': {'consensus': 220, 'previous': 224, 'unit': 'K'},
     }
 
-    def __init__(self):
-        """Initialize the economic calendar."""
+    def __init__(self, auto_refresh: bool = True, force_refresh: bool = False) -> None:
+        """Initialize the economic calendar.
+
+        Args:
+            auto_refresh: pull latest `previous` and consensus proxies from
+                FRED on init. Set to False to use only the static defaults.
+            force_refresh: also bypass the FRED 24h disk cache.
+        """
+        # Per-instance copy of the consensus dict — the class-level
+        # `CONSENSUS_ESTIMATES` stays as a fallback for offline/no-FRED runs.
+        self.consensus_estimates: Dict[str, Dict[str, Any]] = {
+            k: dict(v) for k, v in self.CONSENSUS_ESTIMATES.items()
+        }
+        self.last_refresh: Optional[str] = None
+        self.refresh_source: str = "static"
+
+        if auto_refresh:
+            self._refresh_from_fred(force=force_refresh)
+
         self._events: List[EconomicEvent] = []
         self._load_upcoming_events()
+
+    def _refresh_from_fred(self, force: bool = False) -> None:
+        """Refresh `previous` + consensus proxy from live FRED data."""
+        # Local import keeps this module importable even if the loader
+        # has not been deployed yet (e.g. during partial upgrades).
+        try:
+            from .consensus_loader import ConsensusLoader
+        except ImportError as exc:
+            logger.warning(f"ConsensusLoader unavailable: {exc}")
+            return
+
+        try:
+            loader = ConsensusLoader()
+            fresh = loader.load_all(force_refresh=force)
+        except Exception as exc:
+            logger.warning(f"Could not refresh consensus from FRED: {exc}")
+            return
+
+        if not fresh:
+            logger.warning("FRED refresh returned no data, keeping static defaults")
+            return
+
+        for event_name, fields in fresh.items():
+            base = self.consensus_estimates.setdefault(event_name, {})
+            base.update({
+                "consensus": fields["consensus"],
+                "previous":  fields["previous"],
+                "unit":      fields.get("unit", base.get("unit", "")),
+                "source":    fields.get("source", "fred"),
+                "as_of":     fields.get("as_of"),
+            })
+
+        self.last_refresh = datetime.now().isoformat(timespec="seconds")
+        self.refresh_source = "fred"
+        logger.info(
+            f"EconomicCalendar refreshed {len(fresh)} consensus estimates "
+            f"at {self.last_refresh}"
+        )
 
     def _load_upcoming_events(self) -> None:
         """Load upcoming economic events."""
@@ -269,8 +326,8 @@ class EconomicCalendar:
                 country="US",
                 event_name="Non-Farm Payrolls",
                 impact=EventImpact.CRITICAL,
-                previous=self.CONSENSUS_ESTIMATES['NFP']['previous'],
-                consensus=self.CONSENSUS_ESTIMATES['NFP']['consensus'],
+                previous=self.consensus_estimates['NFP']['previous'],
+                consensus=self.consensus_estimates['NFP']['consensus'],
                 unit="K",
                 event_type="employment",
                 affects=['SPY', 'QQQ', 'TLT', 'DXY', 'EURUSD', 'USDJPY']
@@ -281,8 +338,8 @@ class EconomicCalendar:
                 country="US",
                 event_name="Unemployment Rate",
                 impact=EventImpact.HIGH,
-                previous=self.CONSENSUS_ESTIMATES['Unemployment Rate']['previous'],
-                consensus=self.CONSENSUS_ESTIMATES['Unemployment Rate']['consensus'],
+                previous=self.consensus_estimates['Unemployment Rate']['previous'],
+                consensus=self.consensus_estimates['Unemployment Rate']['consensus'],
                 unit="%",
                 event_type="employment",
                 affects=['SPY', 'TLT', 'DXY']
@@ -297,8 +354,8 @@ class EconomicCalendar:
                     country="US",
                     event_name="CPI MoM",
                     impact=EventImpact.CRITICAL,
-                    previous=self.CONSENSUS_ESTIMATES['CPI MoM']['previous'],
-                    consensus=self.CONSENSUS_ESTIMATES['CPI MoM']['consensus'],
+                    previous=self.consensus_estimates['CPI MoM']['previous'],
+                    consensus=self.consensus_estimates['CPI MoM']['consensus'],
                     unit="%",
                     event_type="inflation",
                     affects=['SPY', 'QQQ', 'TLT', 'DXY', 'EURUSD', 'GC=F']
@@ -309,8 +366,8 @@ class EconomicCalendar:
                     country="US",
                     event_name="CPI YoY",
                     impact=EventImpact.CRITICAL,
-                    previous=self.CONSENSUS_ESTIMATES['CPI YoY']['previous'],
-                    consensus=self.CONSENSUS_ESTIMATES['CPI YoY']['consensus'],
+                    previous=self.consensus_estimates['CPI YoY']['previous'],
+                    consensus=self.consensus_estimates['CPI YoY']['consensus'],
                     unit="%",
                     event_type="inflation",
                     affects=['SPY', 'QQQ', 'TLT', 'DXY', 'EURUSD', 'GC=F']
@@ -321,8 +378,8 @@ class EconomicCalendar:
                     country="US",
                     event_name="Core CPI MoM",
                     impact=EventImpact.CRITICAL,
-                    previous=self.CONSENSUS_ESTIMATES['Core CPI MoM']['previous'],
-                    consensus=self.CONSENSUS_ESTIMATES['Core CPI MoM']['consensus'],
+                    previous=self.consensus_estimates['Core CPI MoM']['previous'],
+                    consensus=self.consensus_estimates['Core CPI MoM']['consensus'],
                     unit="%",
                     event_type="inflation",
                     affects=['SPY', 'QQQ', 'TLT', 'DXY']
@@ -336,8 +393,8 @@ class EconomicCalendar:
                 country="US",
                 event_name="ISM Manufacturing PMI",
                 impact=EventImpact.HIGH,
-                previous=self.CONSENSUS_ESTIMATES['ISM Manufacturing PMI']['previous'],
-                consensus=self.CONSENSUS_ESTIMATES['ISM Manufacturing PMI']['consensus'],
+                previous=self.consensus_estimates['ISM Manufacturing PMI']['previous'],
+                consensus=self.consensus_estimates['ISM Manufacturing PMI']['consensus'],
                 unit="index",
                 event_type="pmi",
                 affects=['SPY', 'QQQ', 'DXY']
@@ -352,8 +409,8 @@ class EconomicCalendar:
                     country="US",
                     event_name="FOMC Rate Decision",
                     impact=EventImpact.CRITICAL,
-                    previous=self.CONSENSUS_ESTIMATES['Fed Funds Rate']['previous'],
-                    consensus=self.CONSENSUS_ESTIMATES['Fed Funds Rate']['consensus'],
+                    previous=self.consensus_estimates['Fed Funds Rate']['previous'],
+                    consensus=self.consensus_estimates['Fed Funds Rate']['consensus'],
                     unit="%",
                     event_type="rates",
                     affects=['SPY', 'QQQ', 'TLT', 'IEF', 'DXY', 'EURUSD', 'USDJPY', 'GC=F']
@@ -367,8 +424,8 @@ class EconomicCalendar:
                 country="US",
                 event_name="Initial Jobless Claims",
                 impact=EventImpact.MEDIUM,
-                previous=self.CONSENSUS_ESTIMATES['Initial Claims']['previous'],
-                consensus=self.CONSENSUS_ESTIMATES['Initial Claims']['consensus'],
+                previous=self.consensus_estimates['Initial Claims']['previous'],
+                consensus=self.consensus_estimates['Initial Claims']['consensus'],
                 unit="K",
                 event_type="employment",
                 affects=['SPY', 'TLT']
@@ -382,8 +439,8 @@ class EconomicCalendar:
                 country="US",
                 event_name="Core PCE MoM",
                 impact=EventImpact.CRITICAL,
-                previous=self.CONSENSUS_ESTIMATES['Core PCE MoM']['previous'],
-                consensus=self.CONSENSUS_ESTIMATES['Core PCE MoM']['consensus'],
+                previous=self.consensus_estimates['Core PCE MoM']['previous'],
+                consensus=self.consensus_estimates['Core PCE MoM']['consensus'],
                 unit="%",
                 event_type="inflation",
                 affects=['SPY', 'QQQ', 'TLT', 'DXY']
@@ -476,7 +533,7 @@ class EconomicCalendar:
         Returns:
             Dictionary with consensus, previous, unit
         """
-        return self.CONSENSUS_ESTIMATES.get(event_name, {})
+        return self.consensus_estimates.get(event_name, {})
 
     def update_consensus(self, event_name: str, consensus: float, previous: Optional[float] = None) -> None:
         """Update consensus estimate for an event.
@@ -486,12 +543,12 @@ class EconomicCalendar:
             consensus: New consensus value
             previous: Previous value (optional)
         """
-        if event_name not in self.CONSENSUS_ESTIMATES:
-            self.CONSENSUS_ESTIMATES[event_name] = {}
+        if event_name not in self.consensus_estimates:
+            self.consensus_estimates[event_name] = {}
 
-        self.CONSENSUS_ESTIMATES[event_name]['consensus'] = consensus
+        self.consensus_estimates[event_name]['consensus'] = consensus
         if previous is not None:
-            self.CONSENSUS_ESTIMATES[event_name]['previous'] = previous
+            self.consensus_estimates[event_name]['previous'] = previous
 
         logger.info(f"Updated consensus for {event_name}: {consensus}")
 
