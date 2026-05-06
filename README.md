@@ -142,6 +142,50 @@ Unlike traditional systems that just show historical reactions, this system deri
 4. **TIPS Spreads** → Inflation expectations
 5. **Historical Sensitivity** → Directional bias for different surprise outcomes
 
+## Data Freshness
+
+Every CLI run pulls live data — there are no hard-coded snapshot values left
+in the prediction path:
+
+| Layer                       | Source                                  | Refreshed                |
+|-----------------------------|-----------------------------------------|--------------------------|
+| Upcoming events / dates     | Generated from `datetime.now()`         | every run                |
+| `previous` (last release)   | FRED series (CPIAUCSL, PAYEMS, …)       | every run, 24h disk-cached |
+| `consensus` proxy           | FRED trailing-3-period mean             | every run, 24h disk-cached |
+| Fed Funds Target Rate       | FRED `DFEDTARU`                         | every run                |
+| VIX / yields / FX / gold    | yfinance live                           | every run, in-process    |
+| `consensus` manual override | `data/consensus_overrides.json`         | always wins              |
+
+Bypass the 24-hour FRED disk cache (e.g. on a release morning):
+
+```bash
+python main.py predict --refresh           # forces a fresh FRED pull
+python main.py quick --refresh
+```
+
+The CLI prints a banner at the top of every run so you can see exactly
+when the data was refreshed:
+
+```
+================================================================================
+MACRO EVENT IMPACT PREDICTIONS
+================================================================================
+Run timestamp:    2026-05-06 16:55:43 (local)
+Predicting from:  2026-05-06 forward (next 14 days)
+Consensus source: FRED  (refreshed at 2026-05-06T16:55:43)
+Market data:      yfinance (live)
+================================================================================
+```
+
+To pin specific consensus numbers (e.g. paste in the morning's ForexFactory /
+Investing.com consensus before a CPI print), copy
+`data/consensus_overrides.example.json` to `data/consensus_overrides.json`
+and edit the values. They override both the FRED proxy and the static fallback.
+
+If FRED is unreachable (no API key, network down, rate limit), the system
+falls back to the static defaults in `EconomicCalendar.CONSENSUS_ESTIMATES`
+and logs a warning.
+
 ## Installation
 
 ```bash
